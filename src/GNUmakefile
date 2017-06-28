@@ -23,31 +23,34 @@ ifeq ($(ANDROID64),1)
 	platform := android64
 endif
 
-Linux_DEFS  = -D_GNU_SOURCE=1
 Linux_LIBS  = -lpthread -lbsd
+
+# address sanitizer: in newer versions of gcc and clang
+Linux_CFLAGS = -fsanitize=address \
+		   -fsanitize=bounds \
+		   -fstack-protector
+Linux_LDFLAGS = $(Linux_CFLAGS)
 
 # Android build flags
 android_LIBS	:= -llog
-android_SOFLAGS = -shared
+android_CFLAGS  = -fstack-protector
+android_LDFLAGS = $(android_CFLAGS)
 
 android64_LIBS	:= -llog
-android64_SOFLAGS = -shared
+android64_CFLAGS  = -fstack-protector
+android64_LDFLAGS = $(android64_CFLAGS)
 
 INCDIRS = . ./$(platform) .. $($(platform)_INCDIRS)
 
-# address sanitizer: in newer versions of gcc and clang
-sanitize = -fsanitize=address \
-		   -fsanitize=bounds \
-		   -fstack-protector
 
 CC = $(CROSS)gcc
 LD = $(CC) -g
 AR = $(CROSS)ar
 INCS    = $(addprefix -I, $(INCDIRS))
-DEFS    = -D__$(platform)__=1 $($(platform)_DEFS)
-CFLAGS  = -g -Wall -fPIC $(sanitize) $(DEFS) $(INCS) $(OPTIMIZE)
+DEFS    = $($(platform)_DEFS) -D_GNU_SOURCE=1
+CFLAGS  = -g -Wall -fPIC $($(platform)_CFLAGS) $(DEFS) $(INCS) $(OPTIMIZE)
 LDLIBS  = $($(platform)_LIBS)
-LDFLAGS = $($(platform)_SOFLAGS) $(sanitize)
+LDFLAGS = $($(platform)_LDFLAGS)
 
 # These are unadorned objects and exes
 objs = ns.o error.o getopt_long.o

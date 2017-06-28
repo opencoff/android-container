@@ -31,7 +31,7 @@
 #include <sys/wait.h>
 #include <sys/mount.h>
 #include <sys/stat.h>
-#include <syscall.h>
+#include <sys/syscall.h>
 #include <sched.h>
 
 #include "getopt_long.h"
@@ -318,7 +318,11 @@ main(int argc, char * const argv[])
 
     flags  = CLONE_NEWNS | CLONE_NEWPID | CLONE_NEWUTS;
     flags |= CLONE_NEWIPC;
+
+#if 0
+    // XXX Not supported on android!
     flags |= CLONE_NEWCGROUP;
+#endif
 
     if (Netns) flags  |= CLONE_NEWNET;
     if (Userns) {
