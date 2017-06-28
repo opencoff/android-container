@@ -27,7 +27,7 @@ b=$(basename $bb)
 ldd $bb | grep -q 'not a dynamic' || die "Need busybox-static"
 
 
-mkdir -p $root/{sbin,bin,etc}
+mkdir -p $root/{sbin,bin,etc,proc,dev,sys,tmp}
 if [ ! -f $root/bin/$b ]; then
     cp $bb $root/bin
     (cd $root/bin;
@@ -45,8 +45,10 @@ if [ ! -f $pre ]; then
 # pre-exec script to be run to setup networking etc.
 # Must exit with 0 on success; else container setup will fail.
 
+kid=$1
 echo "EMPTY pre-exec script. Fill it in.."
-echo "UID=$(id -u)"
+echo "UID=$(id -u); kid pid $kid"
+env
 exit 0
 EOF
 chmod a+x $pre

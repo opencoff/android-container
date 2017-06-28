@@ -5,10 +5,12 @@
 # build platform
 platform := $(shell uname -s)
 odirsuff := dbg
+bld := -D__DEBUG_BUILD__=1
 
 ifeq ($(O),1)
 	OPTIMIZE := -O3
 	odirsuff := rel
+	bld      := -D__RELEASE_BUILD=1
 endif
 
 
@@ -47,7 +49,7 @@ CC = $(CROSS)gcc
 LD = $(CC) -g
 AR = $(CROSS)ar
 INCS    = $(addprefix -I, $(INCDIRS))
-DEFS    = $($(platform)_DEFS) -D_GNU_SOURCE=1
+DEFS    = $($(platform)_DEFS) -D_GNU_SOURCE=1 $(bld)
 CFLAGS  = -g -Wall -fPIC $($(platform)_CFLAGS) $(DEFS) $(INCS) $(OPTIMIZE)
 LDLIBS  = $($(platform)_LIBS)
 LDFLAGS = $($(platform)_LDFLAGS)

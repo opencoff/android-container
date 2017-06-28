@@ -50,6 +50,6 @@ modules.order
 Module.symvers
 Mkfile.old
 dkms.conf
-*/Linux-dbg/*
-*/Linux-rel/*
+*/*-dbg/*
+*/*-rel/*
 .*.sw?

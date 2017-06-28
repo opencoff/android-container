@@ -97,7 +97,7 @@ usage(char *msg)
 {
     if (msg) warn(msg);
 
-    printf("Usage: %s [options] pre-exec.sh /path/to/rootfs post-exec.sh uid gid\n"
+    printf("Usage: %s [options] pre-exec.sh /path/to/rootfs post-exec.sh [uid gid]\n"
             "\n"
             "Where:\n"
             " pre-exec.sh     is called by the parent before creating the container. This can\n"
@@ -109,6 +109,8 @@ usage(char *msg)
             "                 mount-namespace.\n"
             " post-exec.sh    is called by the parent after the container namespace is setup. This\n"
             "                 script is expected to live inside '/path/to/rootfs' sub-directory.\n"
+            "\n"
+            "If --user or -u option is specified, then the next two arguments are mandatory:\n"
             " uid             UID-0 inside the container is mapped to this 'uid'.\n"
             " gid             GID-0 inside the container is mapped to this 'gid'.\n"
             "\n"
@@ -116,6 +118,8 @@ usage(char *msg)
             "  --help, -h     Show this help message and exit\n"
             "  --verbose, -v  Show verbose progress messages\n"
             "  --memory=M, -m M Limit container to M bytes of memory [256M]\n"
+            "                   Optional suffixes of 'k', 'M', 'G' denote kilo, Mega and Gigabyte\n"
+            "                   multiples.\n"
             "  --network, -n  Setup network namespace as well\n"
             "  --user, -u     Setup user namespace as well (with default uid/gid mapping)\n"
             "", program_name);
@@ -237,9 +241,6 @@ child_func(void *arg)
     progress("child: setting up rootfs %s ..\n", cc->rootfs);
     switchroot(cc->rootfs);
 
-    progress("child: mounting /proc %s ..\n", cc->rootfs);
-    if (mount("procfs", "/proc", "procfs", 0, 0) < 0) error(1, errno, "child: can't mount /proc");
-
     // Signal the parent and wait for it to setup uid/gid maps
     signal_socketio(cc->fd, 0, "child");
 
@@ -256,11 +257,22 @@ child_func(void *arg)
     progress("child: exec'ing init %s ..\n", cc->init);
 
     char * const argv[2] = { cc->init, 0 };
-    char * const envp[]  = { "PATH=/sbin:/bin:/usr/sbin:/usr/bin:/usr/local/bin", 0 };
+    const char * envp[5] = { "PATH=/sbin:/bin:/usr/sbin:/usr/bin", 0, 0, 0, 0 };
+    int j = 1;
+
+    // Tell the script whether we have two other options set.
+    if (Userns) envp[j++] = "CLONE_USERNS=1";
+    if (Netns)  envp[j++] = "CLONE_NETNS=1";
+
+    // This macro is defined in GNUmakefile depending on whether
+    // this is a release build or a debug build.
+#if __DEBUG_BUILD__ > 0
+    envp[j++] = "DEBUG=1";
+#endif
 
     signal_socketio(cc->fd, 1, "parent");
 
-    execvpe(cc->init, argv, envp);
+    execvpe(cc->init, argv, (char *const *)envp);
     error(1, errno, "child: execvpe of init failed");
     return 0;
 }
@@ -283,7 +295,7 @@ main(int argc, char * const argv[])
     argc -= r;
     argv  = &argv[r];
 
-    if (argc < 5) {
+    if (argc < 3) {
         usage("Insufficient arguments!");
         exit(1);
     }
@@ -292,18 +304,17 @@ main(int argc, char * const argv[])
     char * const preexec  = argv[0];
     char * const rootfs   = argv[1];
     char * const postexec = argv[2];
-    const char *ustr      = argv[3];
-    const char *gstr      = argv[4];
-    int uid, gid;
-    int pfd[2];
-    int fd;     // parent's end of socketpair
 
+    int pfd[2];
+    int uid = 0,
+        gid = 0,
+        fd  = 0;    // parent's end of socketpair()
+
+    argc -= 3;
+    argv  = &argv[3];
 
     validate_exe("/",    preexec);
     validate_exe(rootfs, postexec);
-
-    uid = parse_uidgid(ustr);
-    gid = parse_uidgid(gstr);
 
     int flags;
     container_config cc = { .rootfs = rootfs, .init = postexec, };
@@ -325,9 +336,20 @@ main(int argc, char * const argv[])
 #endif
 
     if (Netns) flags  |= CLONE_NEWNET;
-    if (Userns) {
-        int euid = geteuid();
 
+    if (Userns) {
+        if (argc < 2) {
+            usage("Insufficient arguments!");
+            exit(1);
+        }
+
+        const char *ustr = argv[0];
+        const char *gstr = argv[1];
+
+        uid = parse_uidgid(ustr);
+        gid = parse_uidgid(gstr);
+
+        int euid = geteuid();
 
         if (euid != 0) check_unpriv_userns(euid);
 
@@ -336,28 +358,17 @@ main(int argc, char * const argv[])
 
     progress("parent: starting child under new namespace ..\n");
     
-#if 0
-    pid_t kid = fork();
-    if (kid == (pid_t)-1) error(1, errno, "can't fork");
-
-    if (kid == 0) { // child
-
-        if (unshare(flags) != 0) error(1, errno, "can't unshare");
-
-        child_func(&cc);    // won't return
-    }
-#else
     pid_t kid = clone(child_func, Stack+STACK_SIZE_WORDS, flags |SIGCHLD, &cc);
     if (kid == (pid_t)-1) error(1, errno, "can't clone");
-#endif
+
+    progress("parent: cloned child %d ..\n", kid);
 
     // complex handshake here;  have to wait until child can
     // unshare(CLONE_NEWUSER) and signal us.
     wait_socketio(fd, "kid");
 
     if (Userns) {
-        progress("parent: clone child PID %d; fixing up container uid/gid to %d/%d\n",
-                kid, uid, gid);
+        progress("parent: fixing up container uid/gid to %d/%d\n", uid, gid);
 
         /*
          * Now, remap the ZERO uid/pid in the cloned namespace.
@@ -515,6 +526,8 @@ writemap(const char *fmt, pid_t kid, int id)
     if (fd < 0) error(1, errno, "can't open %s", file);
     if (dprintf(fd, "0 %d 131072\n", id) < 0) error(1, errno, "i/o error while writing to %s", file);
     close(fd);
+
+    progress("parent: remapped UID/GID %d to 0 for child namespace.", id);
 }
 
 
