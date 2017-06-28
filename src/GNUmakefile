@@ -50,7 +50,7 @@ LDLIBS  = $($(platform)_LIBS)
 LDFLAGS = $($(platform)_SOFLAGS) $(sanitize)
 
 # These are unadorned objects and exes
-objs = ns.o error.o runprog.o getopt_long.o
+objs = ns.o error.o getopt_long.o
 
 exe = ns
 

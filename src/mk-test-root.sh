@@ -1,6 +1,9 @@
 #! /bin/bash
 
 Z=$0
+set -e 
+
+set -x
 
 die() {
     echo "$Z: $@" 1>&2
@@ -17,12 +20,8 @@ pre=/tmp/pre.sh
 # This is relative to $root
 post=post.sh
 
-# user to whom uid/gid 0 will be mapped
-u=sherle
 
 b=$(basename $bb)
-uid=$(id -u $u)
-gid=$(id -g $u)
 
 [ -f $bb ] || die "Can't find busybox"
 ldd $bb | grep -q 'not a dynamic' || die "Need busybox-static"
@@ -32,7 +31,7 @@ mkdir -p $root/{sbin,bin,etc}
 if [ ! -f $root/bin/$b ]; then
     cp $bb $root/bin
     (cd $root/bin;
-     for f in $(bb --list); do
+     for f in $($bb --list); do
          ln busybox $f
      done
     )
@@ -50,5 +49,6 @@ echo "EMPTY pre-exec script. Fill it in.."
 echo "UID=$(id -u)"
 exit 0
 EOF
+chmod a+x $pre
 fi
 
