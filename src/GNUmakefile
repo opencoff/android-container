@@ -25,21 +25,19 @@ ifeq ($(ANDROID64),1)
 	platform := android64
 endif
 
-Linux_LIBS  = -lpthread -lbsd
+Linux_LIBS  =
 
 # address sanitizer: in newer versions of gcc and clang
-Linux_CFLAGS = -fsanitize=address \
-		   -fsanitize=bounds \
-		   -fstack-protector
+Linux_CFLAGS = 
 Linux_LDFLAGS = $(Linux_CFLAGS)
 
 # Android build flags
 android_LIBS	:= -llog
-android_CFLAGS  = -fstack-protector
+android_CFLAGS  =
 android_LDFLAGS = $(android_CFLAGS)
 
 android64_LIBS	:= -llog
-android64_CFLAGS  = -fstack-protector
+android64_CFLAGS  =
 android64_LDFLAGS = $(android64_CFLAGS)
 
 INCDIRS = . ./$(platform) .. $($(platform)_INCDIRS)

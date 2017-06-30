@@ -41,8 +41,6 @@ struct container_config {
     char * const rootfs;     // root of the namespaced file-system
     char * const init;       // pid-0
 
-    int  uid, gid;          // remapped UID/GID
-
     int  fd;    // socketpair fd for communicating with parent
 };
 typedef struct container_config container_config;
@@ -231,12 +229,13 @@ child_func(void *arg)
     /*
      * Setup the rootfs and then exec the kid.
      */
-    if (mount(0, "/", 0, MS_PRIVATE | MS_REC, 0) < 0)
+    if (mount("", "/", "", MS_PRIVATE | MS_REC, 0) < 0)
         error(1, errno, "child: can't remount / as private");
 
     progress("child: unmounting old file systems ..\n");
     if (umount2("/proc", MNT_DETACH) < 0) error(1, errno, "child: can't umount /proc");
     if (umount2("/dev",  MNT_DETACH) < 0) error(1, errno, "child: can't umount /dev");
+    if (umount2("/sys",  MNT_DETACH) < 0) error(1, errno, "child: can't umount /sys");
 
     progress("child: setting up rootfs %s ..\n", cc->rootfs);
     switchroot(cc->rootfs);
