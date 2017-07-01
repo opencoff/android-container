@@ -256,10 +256,10 @@ child_func(void *arg)
 
     progress("child: mounting /proc and /dev..\n");
     target_mount(cc->rootfs, "/proc", "proc",  MS_NOEXEC|MS_NOSUID|MS_NODEV);
-    target_mount(cc->rootfs, "/dev",  "tmpfs", MS_NOEXEC|MS_NOSUID);
 
-    // XXX Can't make devices if unprivileged.
-    //make_devs(cc->rootfs, Devs);
+    // Don't mount a new /dev; we can't make device nodes! The
+    // rootfs should come with a /dev.
+    //target_mount(cc->rootfs, "/dev",  "tmpfs", MS_NOEXEC|MS_NOSUID);
 
     /*
      * XXX Once we pivot, it appears that we lose the ability to mount
