@@ -55,6 +55,16 @@ int         Netns    = 0;
 int         Userns   = 0;
 int         Unprivns = 0;
 
+
+/*
+ * Externals
+ */
+
+// Make a directory and its parents as needed
+extern int mkdirhier(const char *dir, mode_t mode);
+extern const char *dirname(char *buf, size_t bsize, const char *path);
+
+
 /*
  * Internal functions
  */
@@ -73,6 +83,8 @@ static void     writemap(const char *fmt, pid_t kid, int uid);
 static int      reap_child(pid_t kid, int opt);
 static int      check_unpriv_userns(int euid);
 static char *   flags2str(char *, size_t, uint32_t  flags);
+static void     target_mount(char *const rootfs, const char *dir, const char *fs, unsigned long flags);
+//static void     make_devs(char *const rootfs, const device* dev);
 
 static void wait_socketio(int fd, const char*);
 static void signal_socketio(int fd, int eof, const char*);
@@ -179,7 +191,7 @@ maybe_mkdir(const char *dn, int mode)
 
     // We know now that we need to make a dir.
 
-    r = mkdir(dn, mode);
+    r = mkdirhier(dn, mode);
     if (r < 0) return -errno;
 
     return 0;
@@ -243,19 +255,21 @@ child_func(void *arg)
         error(1, errno, "child: can't remount / as private");
 
     progress("child: mounting /proc and /dev..\n");
-    if (mount("procfs", "/tmp/zzroot/proc", "proc", MS_NOEXEC|MS_NOSUID|MS_NODEV, 0) < 0)
-        error(1, errno, "can't mount /proc");
+    target_mount(cc->rootfs, "/proc", "proc",  MS_NOEXEC|MS_NOSUID|MS_NODEV);
+    target_mount(cc->rootfs, "/dev",  "tmpfs", MS_NOEXEC|MS_NOSUID);
 
-    if (mount("tmpfs",  "/tmp/zzroot/dev",  "tmpfs", MS_NOEXEC|MS_NOSUID, 0) < 0)
-        error(1, errno, "can't mount /dev");
+    // XXX Can't make devices if unprivileged.
+    //make_devs(cc->rootfs, Devs);
 
     /*
-     * Once we pivot, it appears that we lose the ability to mount
-     * file systems. I don't understand why this restriction for
-     * namespaced children.
+     * XXX Once we pivot, it appears that we lose the ability to mount
+     *     file systems. I don't understand why this restriction for
+     *     namespaced children.
      */
     progress("child: setting up rootfs %s ..\n", cc->rootfs);
     switchroot(cc->rootfs);
+
+    progress("child: making device nodes in /dev ..\n");
 
     progress("child: exec'ing init %s ..\n", cc->init);
 
@@ -579,6 +593,107 @@ run_exe(char * const exe, pid_t kid)
     run_argv(pargs, (char * const *)envp);
 }
 
+
+/*
+ * Mount a filesystem in a target rootfs
+ */
+static void
+target_mount(char *const rootfs, const char *dir, const char *typ, unsigned long flags)
+{
+    char d[PATH_MAX];
+    int r;
+
+    snprintf(d, sizeof d, "%s%s", rootfs, dir);
+    r = maybe_mkdir(d, 0611);
+    if (r < 0) error(1, errno, "can't mkdir %s", d);
+
+    r = mount(typ, d, typ, flags, 0);
+    if (r < 0) error(1, errno, "can't mount %s under %s", dir, rootfs);
+}
+
+#if 0
+struct device
+{
+    const char *name;   // device name
+    uint32_t   mode;    // permission
+    int        major,   // major #
+               minor;   // minor #
+
+    const char *sym;    // symlink if any
+};
+typedef struct device device;
+
+
+// List of devices that are minimally needed
+static const device Devs[] =
+{
+      { "null",    0600, 1, 3, 0 }
+    , { "zero",    0666, 1, 5, 0 }
+    , { "full",    0666, 1, 7, 0 }
+    , { "random",  0666, 1, 8, 0 }
+    , { "urandom", 0666, 1, 9, 0 }
+    , { "kmsg",    0644, 1, 11, 0   }
+    , { "console", 0600, 5, 1, 0    }
+    , { "tty",     0666, 0, 5, 0    }
+    , { "net/tun", 0666, 10, 200, 0 }
+
+    // Symlinks
+    , { "fd",      .sym="/proc/self/fd/" }
+    , { "stdin",   .sym="/proc/self/fd/0"}
+    , { "stdout",  .sym="/proc/self/fd/1"}
+    , { "stderr",  .sym="/proc/self/fd/2"}
+
+    , { 0, 0, 0, 0 }
+};
+
+
+
+static void
+make_devs(char *const rootfs, const device *d)
+{
+    char p[PATH_MAX];
+    char dn[PATH_MAX];
+    struct stat st;
+    int r;
+
+    for (; d->name; d++) {
+        snprintf(p, sizeof p, "%s/dev/%s", rootfs, d->name);
+        dirname(dn, sizeof dn, p);
+
+        r = maybe_mkdir(dn, 0755);
+        if (r < 0) error(1, errno, "can't make dir %s", dn);
+
+        r = lstat(p, &st);
+
+        // validate first
+
+        if (d->sym) {
+            if (r == 0) {
+                if (S_ISLNK(st.st_mode)) continue;
+
+                unlink(p);
+            }
+
+            progress("child: ln -s %s -> %s\n", p, d->sym);
+            // make the symlink
+            r = symlink(d->sym, p);
+            if (r < 0) error(1, errno, "can't symlink %s -> %s", p, d->sym);
+
+        } else {
+            dev_t z = makedev(d->major, d->minor);
+            if (r == 0) {
+                if (st.st_dev == z) continue;
+
+                unlink(p);
+            }
+
+            progress("child: mknod %s c  %d %d\n", p, d->major, d->minor);
+            r = mknod(p, d->mode, z);
+            if (r < 0) error(1, errno, "can't mknod %s", p);
+        }
+    }
+}
+#endif
 
 
 /*

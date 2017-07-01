@@ -53,7 +53,7 @@ LDLIBS  = $($(platform)_LIBS)
 LDFLAGS = $($(platform)_LDFLAGS)
 
 # These are unadorned objects and exes
-objs = ns.o error.o getopt_long.o
+objs = ns.o error.o getopt_long.o mkdirhier.o dirname.o
 
 exe = ns
 
