@@ -5,7 +5,7 @@
  *
  * Copyright (c) 2017 Sudhi Herle <sw at herle.net>
  *
- * Licensing Terms: GPLv2 
+ * Licensing Terms: GPLv2
  *
  * If you need a commercial license for this work, please contact
  * the author.
@@ -72,6 +72,7 @@ static void     run_exe(char *const exe, pid_t kid);
 static void     writemap(const char *fmt, pid_t kid, int uid);
 static int      reap_child(pid_t kid, int opt);
 static int      check_unpriv_userns(int euid);
+static char *   flags2str(char *, size_t, uint32_t  flags);
 
 static void wait_socketio(int fd, const char*);
 static void signal_socketio(int fd, int eof, const char*);
@@ -134,7 +135,7 @@ usage(char *msg)
  * 'gid_maps' file, use of the setgroups() system call in this
  * user namespace must first be disabled by writing "deny" to one
  * of the /proc/PID/setgroups files for this namespace.  That is
- * the purpose of the following function. 
+ * the purpose of the following function.
  */
 static void
 update_setgroups(pid_t kid, char *str)
@@ -221,6 +222,15 @@ child_func(void *arg)
 {
     container_config *cc = arg;
 
+    progress("child: uid %d, pid %d; waiting for parent to setup ..\n", getuid(), getpid());
+    /*
+     * Wait until the parent has updated the UID and GID mappings.
+     * See the comment in main(). We wait for end of file on a
+     * pipe that will be closed by the parent process once it has
+     * updated the mappings.
+     */
+    wait_socketio(cc->fd, "child");
+
     if (getuid() != 0) error(1, 0, "child: I am not uid 0, but %d!\n", getuid());
     if (getpid() != 1) error(1, 0, "child: I am not pid 1, but %d!\n", getpid());
 
@@ -232,26 +242,20 @@ child_func(void *arg)
     if (mount("", "/", "", MS_PRIVATE | MS_REC, 0) < 0)
         error(1, errno, "child: can't remount / as private");
 
-    progress("child: unmounting old file systems ..\n");
-    if (umount2("/proc", MNT_DETACH) < 0) error(1, errno, "child: can't umount /proc");
-    if (umount2("/dev",  MNT_DETACH) < 0) error(1, errno, "child: can't umount /dev");
-    if (umount2("/sys",  MNT_DETACH) < 0) error(1, errno, "child: can't umount /sys");
+    progress("child: mounting /proc and /dev..\n");
+    if (mount("procfs", "/tmp/zzroot/proc", "proc", MS_NOEXEC|MS_NOSUID|MS_NODEV, 0) < 0)
+        error(1, errno, "can't mount /proc");
 
-    progress("child: setting up rootfs %s ..\n", cc->rootfs);
-    switchroot(cc->rootfs);
-
-    // Signal the parent and wait for it to setup uid/gid maps
-    signal_socketio(cc->fd, 0, "child");
+    if (mount("tmpfs",  "/tmp/zzroot/dev",  "tmpfs", MS_NOEXEC|MS_NOSUID, 0) < 0)
+        error(1, errno, "can't mount /dev");
 
     /*
-     * Wait until the parent has updated the UID and GID mappings.
-     * See the comment in main(). We wait for end of file on a
-     * pipe that will be closed by the parent process once it has
-     * updated the mappings.
+     * Once we pivot, it appears that we lose the ability to mount
+     * file systems. I don't understand why this restriction for
+     * namespaced children.
      */
-    wait_socketio(cc->fd, "child");
-
-    progress("child: pid %d; uid %d -- resuming..\n", getpid(), getuid());
+    progress("child: setting up rootfs %s ..\n", cc->rootfs);
+    switchroot(cc->rootfs);
 
     progress("child: exec'ing init %s ..\n", cc->init);
 
@@ -268,8 +272,6 @@ child_func(void *arg)
 #if __DEBUG_BUILD__ > 0
     envp[j++] = "DEBUG=1";
 #endif
-
-    signal_socketio(cc->fd, 1, "parent");
 
     execvpe(cc->init, argv, (char *const *)envp);
     error(1, errno, "child: execvpe of init failed");
@@ -327,7 +329,7 @@ main(int argc, char * const argv[])
     fd     = pfd[1];
 
     flags  = CLONE_NEWNS | CLONE_NEWPID | CLONE_NEWUTS;
-    flags |= CLONE_NEWIPC;
+    //flags |= CLONE_NEWIPC;
 
 #if 0
     // XXX Not supported on android!
@@ -355,16 +357,13 @@ main(int argc, char * const argv[])
         flags |= CLONE_NEWUSER;
     }
 
-    progress("parent: starting child under new namespace ..\n");
-    
+    char dbuf[128];
+    progress("parent: starting new namespace (%s)..\n", flags2str(dbuf, sizeof dbuf, flags));
+
     pid_t kid = clone(child_func, Stack+STACK_SIZE_WORDS, flags |SIGCHLD, &cc);
     if (kid == (pid_t)-1) error(1, errno, "can't clone");
 
     progress("parent: cloned child %d ..\n", kid);
-
-    // complex handshake here;  have to wait until child can
-    // unshare(CLONE_NEWUSER) and signal us.
-    wait_socketio(fd, "kid");
 
     if (Userns) {
         progress("parent: fixing up container uid/gid to %d/%d\n", uid, gid);
@@ -523,10 +522,10 @@ writemap(const char *fmt, pid_t kid, int id)
 
     int fd = open(file, O_CLOEXEC|O_WRONLY);
     if (fd < 0) error(1, errno, "can't open %s", file);
-    if (dprintf(fd, "0 %d 131072\n", id) < 0) error(1, errno, "i/o error while writing to %s", file);
+    if (dprintf(fd, "0 %d 1\n", id) < 0) error(1, errno, "i/o error while writing to %s", file);
     close(fd);
 
-    progress("parent: remapped UID/GID %d to 0 for child namespace.", id);
+    progress("parent: remapped UID/GID %d to 0 for child namespace.\n", id);
 }
 
 
@@ -619,8 +618,70 @@ limit_memory(pid_t pid, uint64_t memlimit)
     write64(dir, "cgroup.procs", pid);
 }
 
+// Turn CLONE_xxx flags to string
+struct cflag
+{
+    uint32_t mask;
+    const char *name;
+};
 
-static const struct option Longopt[] = 
+// list of flags & their names
+typedef struct cflag cflag;
+const cflag Flagnames[] =
+{
+#define __zstr(a)   __za(a)
+#define __za(a)     #a
+#define _x(a)   {CLONE_ ## a, __zstr(a)}
+      _x(VM)
+    , _x(FS)
+    , _x(FILES)
+    , _x(SIGHAND)
+    , _x(PTRACE)
+    , _x(VFORK)
+    , _x(PARENT)
+    , _x(THREAD)
+    , _x(NEWNS)
+    , _x(SYSVSEM)
+    , _x(SETTLS)
+    , _x(PARENT_SETTID)
+    , _x(CHILD_CLEARTID)
+    , _x(UNTRACED)
+    , _x(CHILD_SETTID)
+    , _x(NEWCGROUP)
+    , _x(NEWUTS)
+    , _x(NEWIPC)
+    , _x(NEWUSER)
+    , _x(NEWPID)
+    , _x(NEWNET)
+    , _x(IO)
+    , {0, 0}
+};
+
+static char *
+flags2str(char *s, size_t n, uint32_t flags)
+{
+    char *start    = s;
+    const cflag *c = &Flagnames[0];
+
+    n -= 1; // trailing zero
+    for (; c->name; c++) {
+        if (!(c->mask & flags)) continue;
+
+        size_t m = strlen(c->name);
+        if (n < (m+1)) die("insufficient space for flag2str");
+
+        memcpy(s, c->name, m);
+        s += m;
+        n -= m;
+
+        *s++ = ' ';
+        n--;
+    }
+    s[-1] = 0;
+    return start;
+}
+
+static const struct option Longopt[] =
 {
       {"help",                  no_argument, 0, 'h'}
     , {"verbose",               no_argument, 0, 'v'}
