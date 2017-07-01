@@ -762,7 +762,9 @@ const cflag Flagnames[] =
     , _x(CHILD_CLEARTID)
     , _x(UNTRACED)
     , _x(CHILD_SETTID)
+#ifdef CLONE_NEWCGROUP
     , _x(NEWCGROUP)
+#endif
     , _x(NEWUTS)
     , _x(NEWIPC)
     , _x(NEWUSER)
