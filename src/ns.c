@@ -800,11 +800,11 @@ flags2str(char *s, size_t n, uint32_t flags)
 
 static const struct option Longopt[] =
 {
-      {"help",                  no_argument, 0, 'h'}
-    , {"verbose",               no_argument, 0, 'v'}
-    , {"memory",                required_argument, 0, 'c'}
-    , {"network",               no_argument, 0, 'n'}
-    , {"user",                  no_argument, 0, 'u'}
+      {"help",                  no_argument, 0,       'h'}
+    , {"verbose",               no_argument, 0,       'v'}
+    , {"memory",                required_argument, 0, 'm'}
+    , {"network",               no_argument, 0,       'n'}
+    , {"user",                  no_argument, 0,       'u'}
     , {0, 0, 0, 0}
 };
 static const char Shortopt[] = "hvm:nu";
