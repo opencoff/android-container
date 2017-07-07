@@ -1,7 +1,14 @@
 #! /bin/bash
 
+#
+# simple script to make a busybox based rootfs.
+#
+# Requires busybox-static.
+#
+
 Z=$0
 set -e 
+bb=/bin/busybox
 
 die() {
     echo "$Z: $@" 1>&2
@@ -12,20 +19,22 @@ warn() {
     echo "$Z: $@" 1>&2
 }
 
+me=$(id -u)
 if [ "x$1" != "x" ]; then
     root=$1
-    test -d $root && die "Root dir $root already exists"
 else
     root=/tmp/zzroot
 fi
 
-me=$(id -u)
+[ -d $root  ] && die "Root dir $root already exists"
 [ $me -eq 0 ] || die "Need root privileges to run"
 
-bb=/bin/busybox
-pre=/tmp/pre.sh
-# This is relative to $root
-post=post.sh
+[ -x $bb ] || die "Can't find busybox"
+ldd $bb | grep -q 'not a dynamic' || die "Need busybox-static"
+
+b=$(basename $bb)
+post=$root/post.sh
+pre=$root/pre.sh    # Its ok to be in this dir
 
 devs="null:0600:1:3 \
 zero:0666:1:5 \
@@ -37,19 +46,12 @@ console:0600:5:1 \
 tty:0666:0:5 \
 net/tun:0666:10:200"
 
-
-b=$(basename $bb)
-
-[ -f $bb ] || die "Can't find busybox"
-ldd $bb | grep -q 'not a dynamic' || die "Need busybox-static"
-
-
 mkdir -p $root/{sbin,bin,etc,proc,dev,sys,tmp}
 if [ ! -f $root/bin/$b ]; then
     cp $bb $root/bin
     (cd $root/bin;
      for f in $($bb --list); do
-         ln busybox $f || exit 1
+         ln -f busybox $f || exit 1
      done
     ) || exit 1
 
@@ -77,19 +79,12 @@ if [ ! -f $root/bin/$b ]; then
 fi
 
 
-if [ ! -f $pre ]; then
-    cat <<EOF > $pre
-#! /bin/bash
+[ -f $pre  ] || cp ../examples/pre.sh  $pre  || exit 1
+[ -f $post ] || cp ../examples/post.sh $post || exit 1
 
-# pre-exec script to be run to setup networking etc.
-# Must exit with 0 on success; else container setup will fail.
+cat <<EOF
+$Z: You can now create a unprivileged container via:
 
-kid=$1
-echo "EMPTY pre-exec script. Fill it in.."
-echo "UID=$(id -u); kid pid $kid"
-env
-exit 0
+    ns -v -u $root/pre.sh $root $root/init.sh
+
 EOF
-chmod a+x $pre
-fi
-
