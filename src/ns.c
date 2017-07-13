@@ -209,7 +209,7 @@ switchroot(const char *root)
     char pivot[PATH_MAX+1];
 
     realpath(root, rootpath);
-    snprintf(pivot, PATH_MAX, "%s/.pivot", rootpath);
+    snprintf(pivot, PATH_MAX, "%s/tmp/.pivot", rootpath);
 
     r = maybe_mkdir(pivot, 0700);
     if (r < 0) error(1, errno, "can't mkdir %s", pivot);
@@ -222,10 +222,10 @@ switchroot(const char *root)
 
     chdir("/");
 
-    r = umount2("/.pivot", MNT_DETACH);
+    r = umount2("/tmp/.pivot", MNT_DETACH);
     if (r < 0) error(1, errno, "can't umount /.pivot");
 
-    rmdir("/.pivot");
+    rmdir("/tmp/.pivot");
     return 0;
 }
 
@@ -235,6 +235,7 @@ child_func(void *arg)
     container_config *cc = arg;
 
     progress("child: uid %d, pid %d; waiting for parent to setup ..\n", getuid(), getpid());
+
     /*
      * Wait until the parent has updated the UID and GID mappings.
      * See the comment in main(). We wait for end of file on a
@@ -254,7 +255,7 @@ child_func(void *arg)
     if (mount("", "/", "", MS_PRIVATE | MS_REC, 0) < 0)
         error(1, errno, "child: can't remount / as private");
 
-    progress("child: mounting /proc and /dev..\n");
+    progress("child: mounting /proc ..\n");
     target_mount(cc->rootfs, "/proc", "proc",  MS_NOEXEC|MS_NOSUID|MS_NODEV);
 
     // Don't mount a new /dev; we can't make device nodes! The
@@ -268,8 +269,6 @@ child_func(void *arg)
      */
     progress("child: setting up rootfs %s ..\n", cc->rootfs);
     switchroot(cc->rootfs);
-
-    progress("child: making device nodes in /dev ..\n");
 
     progress("child: exec'ing init %s ..\n", cc->init);
 

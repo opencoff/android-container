@@ -33,7 +33,7 @@ fi
 ldd $bb | grep -q 'not a dynamic' || die "Need busybox-static"
 
 b=$(basename $bb)
-post=$root/post.sh
+post=$root/init.sh
 pre=$root/pre.sh    # Its ok to be in this dir
 
 devs="null:0600:1:3 \
@@ -46,12 +46,13 @@ console:0600:5:1 \
 tty:0666:0:5 \
 net/tun:0666:10:200"
 
-mkdir -p $root/{sbin,bin,etc,proc,dev,sys,tmp}
+mkdir -p $root/{sbin,bin,etc,proc,dev,sys,tmp} || die "can't make base dirs"
+chmod a+rwxts $root/tmp || die "can't chmod $root/tmp"
 if [ ! -f $root/bin/$b ]; then
-    cp $bb $root/bin
+    cp $bb $root/bin || die "can't cp $bb to $root"
     (cd $root/bin;
      for f in $($bb --list); do
-         ln -f busybox $f || exit 1
+         ln -f busybox $f || die "can't ln busybox to $f"
      done
     ) || exit 1
 
@@ -65,26 +66,26 @@ if [ ! -f $root/bin/$b ]; then
          min=$4
          bn=$(dirname $d)
 
-         test -d $bn || mkdir -p $bn
-         mknod $d c $maj $min || exit 1
-         chmod $mod $d || exit 1
+         test -d $bn || mkdir -p $bn || die "can't mkdir $bn"
+         mknod $d c $maj $min        || die "can't mknod $d ($maj $min)"
+         chmod $mod $d               || die "can't chmod $d"
     done
 
-    ln -s /proc/self/fd/  fd     || exit 1
-    ln -s /proc/self/fd/0 stdin  || exit 1
-    ln -s /proc/self/fd/1 stdout || exit 1
-    ln -s /proc/self/fd/2 stderr || exit 1
+    ln -s /proc/self/fd/  fd     || die "can't ln /proc/self/fd"
+    ln -s /proc/self/fd/0 stdin  || die "can't ln /proc/self/fd/0"
+    ln -s /proc/self/fd/1 stdout || die "can't ln /proc/self/fd/1"
+    ln -s /proc/self/fd/2 stderr || die "can't ln /proc/self/fd/2"
     ) || exit 1
 
 fi
 
 
-[ -f $pre  ] || cp ../examples/pre.sh  $pre  || exit 1
-[ -f $post ] || cp ../examples/post.sh $post || exit 1
+[ -f $pre  ] || cp ../examples/pre.sh  $pre  || die "can't cp pre.sh"
+[ -f $post ] || cp ../examples/post.sh $post || die "can't cp init.sh"
 
 cat <<EOF
 $Z: You can now create a unprivileged container via:
 
-    ns -v -u $root/pre.sh $root $root/init.sh
+    ns -v -u $root/pre.sh $root /init.sh \$(id -u) \$(id -g)
 
 EOF

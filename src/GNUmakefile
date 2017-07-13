@@ -4,13 +4,14 @@
 
 # build platform
 platform := $(shell uname -s)
-odirsuff := dbg
-bld := -D__DEBUG_BUILD__=1
 
 ifeq ($(O),1)
 	OPTIMIZE := -O3
 	odirsuff := rel
 	bld      := -D__RELEASE_BUILD=1
+else
+	odirsuff := dbg
+	bld      := -D__DEBUG_BUILD__=1
 endif
 
 
@@ -32,13 +33,13 @@ Linux_CFLAGS =
 Linux_LDFLAGS = $(Linux_CFLAGS)
 
 # Android build flags
-android_LIBS	:= -llog
+android_LIBS	:=
 android_CFLAGS  =
 android_LDFLAGS = $(android_CFLAGS)
 
-android64_LIBS	:= -llog
+android64_LIBS	:=
 android64_CFLAGS  =
-android64_LDFLAGS = $(android64_CFLAGS)
+android64_LDFLAGS = $(android64_CFLAGS) -static
 
 INCDIRS = . ./$(platform) .. $($(platform)_INCDIRS)
 
